@@ -1,0 +1,8 @@
+## Interface: 11200
+## Title: SlimSwing |cff6699FFRedesign|r
+## Version: 1.0
+## Author: b8iab
+## Notes: Swing Timer con diseño moderno basado en AttackBar de Sivent. Click derecho para bloquear/desbloquear.
+## SavedVariables: SlimSwingDB
+
+SlimSwing.lua
