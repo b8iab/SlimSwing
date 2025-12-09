@@ -1,5 +1,5 @@
-﻿-- SlimSwing Minimal for Turtle WoW (Vanilla 1.12)
--- Version 6.2 - Con opcion de estilo ultra delgado
+-- SlimSwing Minimal for Turtle WoW (Vanilla 1.12)
+-- Version 6.3 - Fix off-hand detection + thin mode default
 
 -- ============================================================
 -- SAVED VARIABLES Y DEFAULTS
@@ -10,7 +10,7 @@ local defaults = {
     locked = false,
     showOffhand = true,
     showTimer = true,
-    thinMode = false,
+    thinMode = true,  -- Thin mode por defecto
     pos = {x = 0, y = 100},
 }
 
@@ -161,60 +161,38 @@ OHBar.spark:Hide()
 -- FUNCIONES DE ESTILO
 -- ============================================================
 local function ApplyThinMode()
-    -- Barras ultra delgadas (3px)
     MHBar:SetHeight(3)
     OHBar:SetHeight(3)
-    
-    -- Sin borde
     MHBar.border:Hide()
     OHBar.border:Hide()
-    
-    -- Sin texto interno
     MHBar.text:Hide()
     MHBar.timer:Hide()
     OHBar.text:Hide()
     OHBar.timer:Hide()
-    
-    -- Timer externo visible
     MHBar.timerOut:Show()
     OHBar.timerOut:Show()
-    
-    -- Spark mas pequeño
     MHBar.spark:SetWidth(8)
     MHBar.spark:SetHeight(12)
     OHBar.spark:SetWidth(8)
     OHBar.spark:SetHeight(12)
-    
-    -- Espaciado
-    OHBar:SetPoint("TOPLEFT", MHBar, "BOTTOMLEFT", 0, -2)
+    OHBar:SetPoint("TOPLEFT", MHBar, "BOTTOMLEFT", 0, -5)
 end
 
 local function ApplyNormalMode()
-    -- Barras normales (8px)
     MHBar:SetHeight(8)
     OHBar:SetHeight(8)
-    
-    -- Con borde
     MHBar.border:Show()
     OHBar.border:Show()
-    
-    -- Texto interno visible
     MHBar.text:Show()
     MHBar.timer:Show()
     OHBar.text:Show()
     OHBar.timer:Show()
-    
-    -- Timer externo oculto
     MHBar.timerOut:Hide()
     OHBar.timerOut:Hide()
-    
-    -- Spark normal
     MHBar.spark:SetWidth(12)
     MHBar.spark:SetHeight(20)
     OHBar.spark:SetWidth(12)
     OHBar.spark:SetHeight(20)
-    
-    -- Espaciado
     OHBar:SetPoint("TOPLEFT", MHBar, "BOTTOMLEFT", 0, -3)
 end
 
@@ -233,25 +211,21 @@ local function UpdateVisibility()
     
     if hasOH and SlimSwingDB.showOffhand then
         OHBar:Show()
-        if SlimSwingDB.thinMode then
-            AnchorFrame:SetHeight(10)
-        else
-            AnchorFrame:SetHeight(22)
-        end
+        AnchorFrame:SetHeight(SlimSwingDB.thinMode and 10 or 22)
     else
         OHBar:Hide()
-        if SlimSwingDB.thinMode then
-            AnchorFrame:SetHeight(5)
-        else
-            AnchorFrame:SetHeight(10)
-        end
+        AnchorFrame:SetHeight(SlimSwingDB.thinMode and 5 or 10)
     end
 end
 
 local function SavePosition()
-    local _, _, _, x, y = AnchorFrame:GetPoint()
-    SlimSwingDB.pos.x = x
-    SlimSwingDB.pos.y = y
+    local centerX, centerY = AnchorFrame:GetCenter()
+    local parentCenterX, parentCenterY = UIParent:GetCenter()
+    
+    if centerX and centerY and parentCenterX and parentCenterY then
+        SlimSwingDB.pos.x = centerX - parentCenterX
+        SlimSwingDB.pos.y = centerY - parentCenterY
+    end
 end
 
 local function LoadPosition()
@@ -345,17 +319,26 @@ local function DetectSwingHand()
     local mhSpeed, ohSpeed = UnitAttackSpeed("player")
     local now = GetTime()
     
+    -- Sin off-hand, siempre es main hand
     if not ohSpeed then
+        lastMHSwing = now
+        mhCount = mhCount + 1
         StartMHSwing()
         return
     end
     
+    -- Inicializar si es primera vez
+    if lastMHSwing == 0 then lastMHSwing = now - mhSpeed end
+    if lastOHSwing == 0 then lastOHSwing = now - ohSpeed end
+    
+    -- Calcular cual swing es mas probable
     local mhExpected = lastMHSwing + mhSpeed
     local ohExpected = lastOHSwing + ohSpeed
     local mhDiff = math.abs(now - mhExpected)
     local ohDiff = math.abs(now - ohExpected)
     
-    if mhDiff <= ohDiff or mhCount <= ohCount then
+    -- Decidir basado solo en tiempo esperado
+    if mhDiff <= ohDiff then
         lastMHSwing = now
         mhCount = mhCount + 1
         StartMHSwing()
@@ -381,6 +364,21 @@ local function ResetSwingCounters()
     OHBar.timerOut:SetText("")
     MHBar.spark:Hide()
     OHBar.spark:Hide()
+end
+
+local function InitCombatSwings()
+    local mhSpeed, ohSpeed = UnitAttackSpeed("player")
+    local now = GetTime()
+    
+    lastMHSwing = now
+    lastOHSwing = now
+    mhCount = 0
+    ohCount = 0
+    
+    StartMHSwing()
+    if ohSpeed and SlimSwingDB.showOffhand then
+        StartOHSwing()
+    end
 end
 
 -- ============================================================
@@ -441,10 +439,11 @@ end)
 local EventFrame = CreateFrame("Frame")
 EventFrame:RegisterEvent("VARIABLES_LOADED")
 EventFrame:RegisterEvent("PLAYER_LOGIN")
+EventFrame:RegisterEvent("PLAYER_ENTER_COMBAT")
+EventFrame:RegisterEvent("PLAYER_LEAVE_COMBAT")
 EventFrame:RegisterEvent("CHAT_MSG_COMBAT_SELF_HITS")
 EventFrame:RegisterEvent("CHAT_MSG_COMBAT_SELF_MISSES")
 EventFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
-EventFrame:RegisterEvent("PLAYER_LEAVE_COMBAT")
 
 EventFrame:SetScript("OnEvent", function()
     if event == "VARIABLES_LOADED" or event == "PLAYER_LOGIN" then
@@ -452,7 +451,10 @@ EventFrame:SetScript("OnEvent", function()
         LoadPosition()
         UpdateStyle()
         UpdateVisibility()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff6699FFSlimSwing v6.2|r cargado! |cffFFFF00/ss|r para opciones")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff6699FFSlimSwing v6.3|r cargado! |cffFFFF00/ss|r para opciones")
+        
+    elseif event == "PLAYER_ENTER_COMBAT" then
+        InitCombatSwings()
         
     elseif event == "PLAYER_LEAVE_COMBAT" then
         ResetSwingCounters()
@@ -463,12 +465,14 @@ EventFrame:SetScript("OnEvent", function()
         if not spell then _, _, spell = string.find(arg1, "Your (.+) misses") end
         
         if spell then
+            -- Ataques especiales que resetean main hand
             if spell == "Heroic Strike" or spell == "Cleave" or 
                spell == "Maul" or spell == "Raptor Strike" or
                spell == "Mongoose Bite" then
                 DetectSwingHand()
             end
         else
+            -- Auto ataque normal
             DetectSwingHand()
         end
         
@@ -483,13 +487,13 @@ end)
 -- SLASH COMMANDS
 -- ============================================================
 SLASH_SlimSwing1 = "/ss"
-SLASH_SlimSwing2 = "/SlimSwing"
+SLASH_SlimSwing2 = "/slimswing"
 
 SlashCmdList["SlimSwing"] = function(msg)
     msg = string.lower(msg or "")
     
     if msg == "" or msg == "help" then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff6699FF=== SlimSwing v6.2 ===|r")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff6699FF=== SlimSwing v6.3 ===|r")
         DEFAULT_CHAT_FRAME:AddMessage("|cffFFFF00/ss lock|r - Bloquear/Desbloquear")
         DEFAULT_CHAT_FRAME:AddMessage("|cffFFFF00/ss thin|r - Alternar estilo delgado")
         DEFAULT_CHAT_FRAME:AddMessage("|cffFFFF00/ss offhand|r - Mostrar/Ocultar off-hand")
